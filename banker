@@ -1,0 +1,240 @@
+#!/bin/bash
+
+<<COMMENT
+John Henry Mejia
+Operating Systems
+Banker's Algorithm Project
+April 2023
+COMMENT
+
+# Main function
+# This is the main function of the program. 
+# It performs the Banker's Algorithm.
+main () {
+  # Check to make sure that a file name was passed in
+  if [ $# -ne 1 ]; then
+      echo "Usage: $0 <input file>"
+      exit 1
+  fi
+
+  # Get file name from command line
+  file_name=$1
+
+  # Check to see if the file exists
+  if [ ! -f $file_name ]; then
+      echo "File does not exist"
+      exit 1
+  fi
+
+  # Read the input file
+  input=$(cat $file_name)
+
+  # Get the values of n and m
+  n=$(echo "$input" | head -n 1 | awk '{print $1}')
+  m=$(echo "$input" | head -n 1 | awk '{print $2}')
+
+  echo -e "There are $n processes and $m resource types in the system.\n"
+
+
+    # Get the resource vector of size m, on line 3, as an array
+
+  line_number=3
+  num_of_elements=$m
+
+  get_line_as_array "$input" "$line_number" "$num_of_elements" resource_vector_array " "
+
+
+
+  # Print the resource vector with letters on top
+  echo "The Resource Vector is:"
+  print_letter $m
+  echo -e "${resource_vector_array[@]}\n"
+
+  # Extracting the 1xm available vector
+
+  line_number=5
+  num_of_elements=$m
+
+  get_line_as_array "$input" "$line_number" "$num_of_elements" available_vector_array " "
+
+  # Print the available vector with letters on top
+  echo "The Available Vector is:"
+  print_letter $m
+  echo -e "${available_vector_array[@]}\n"
+
+
+  # Extracting the nxm maximum matrix
+  max_matrix_array=($(extract_matrix 7 $m $n))
+
+  # Print the maximum matrix with letters on top
+  echo "The Max Matrix is:"
+  printf '%s  ' " "
+  print_letter $m
+  for (( i=0; i<n; i++ )); do
+    printf '%s: ' "${i}"
+    for (( j=0; j<m; j++ )); do
+      printf '%s ' "${max_matrix_array[$i*$m+$j]}"
+    done
+    printf '\n'
+  done
+  echo ""
+
+  # Extracting the nxm allocation matrix
+  allocation_matrix_array=($(extract_matrix $((7+n)) $m $n))
+
+  # Print the allocation matrix with letters on top
+  echo "The Allocation Matrix is:"
+  printf '%s  ' " "
+  print_letter $m
+  for (( i=0; i<n; i++ )); do
+    printf '%s: ' "${i}"
+    for (( j=0; j<m; j++ )); do
+      printf '%s ' "${allocation_matrix_array[$i*$m+$j]}"
+    done
+    printf '\n'
+  done
+  echo ""
+
+
+  # Calculate the need matrix
+
+  need_matrix_array=()
+
+  # Loop through the lines of the need matrix
+  for (( i=0; i<n; i++ )); do
+    # Create a new array to hold the current line of the matrix
+    declare -a current_line_array=()
+
+    # Loop through the columns of the need matrix
+    for (( j=0; j<m; j++ )); do
+      # Calculate the value for the current cell
+      current_cell_value=$((max_matrix_array[$i*$m+$j] - allocation_matrix_array[$i*$m+$j]))
+
+      # Append the current cell value to the current line array
+      current_line_array+=("$current_cell_value")
+    done
+
+    # Append the current line array to the need_matrix_array
+    need_matrix_array+=("${current_line_array[@]}")
+  done
+
+  # Print the need matrix with letters on top
+  echo "The Need Matrix is:"
+  printf '%s  ' " "
+
+  print_letter $m
+  for (( i=0; i<n; i++ )); do
+    printf '%s: ' "${i}" 
+
+    for (( j=0; j<m; j++ )); do
+      printf '%s ' "${need_matrix_array[$i*$m+$j]}"
+      
+    done
+    printf '\n'
+  done
+
+  echo ""
+
+
+  # Check if the system is in a safe state
+  is_safe_state available_vector_array[@] need_matrix_array[@] allocation_matrix_array[@] $n $m
+  if [[ $? -ne 0 ]]; then
+    echo "THE SYSTEM IS NOT IN A SAFE STATE"
+    exit 1
+  fi
+
+  echo -e "THE SYSTEM IS IN A SAFE STATE\n"
+  # Get the request vector in format pid: r1 r2 r3
+  # Example: 0:1 0 1 
+  # It is 2 lines below the current line_number
+
+  line_number=$((line_number+ 2 * n +  4))
+
+
+  # Extract the process id from the request vector line (everything before the colon)
+  pid=$(sed "${line_number}q;d" <<< "$input" | awk -F: '{print $1}')
+
+  # Extract the request vector from the request vector line (everything after the colon)
+  request_vector=$(sed "${line_number}q;d" <<< "$input" | awk -F: '{print $2}')
+
+  # Turn the request vector into an array
+  request_vector_array=($request_vector)
+
+  # Print the request vector with letters on top
+  echo -e "The Request Vector is:"
+  printf '%s  ' " "
+  print_letter $m
+  echo -e "$pid: ${request_vector_array[@]}\n"
+
+  # Determine if the request can be granted
+  is_request_grantable request_vector_array[@] available_vector_array[@] need_matrix_array[@] allocation_matrix_array[@] $n $m $pid
+  if [[ $? -ne 0 ]]; then
+    echo "THE REQUEST CANNOT BE GRANTED"
+    exit 1
+  fi
+
+  echo -e "THE REQUEST CAN BE GRANTED: NEW STATE FOLLOWS\n"
+
+  # Update the available vector
+  for (( i=0; i<m; i++ )); do
+    available_vector_array[$i]=$((available_vector_array[$i] - request_vector_array[$i]))
+  done
+
+  # Update the allocation matrix
+  for (( i=0; i<m; i++ )); do
+    allocation_matrix_array[$pid*$m+$i]=$((allocation_matrix_array[$pid*$m+$i] + request_vector_array[$i]))
+  done
+
+  # Update the need matrix
+  for (( i=0; i<m; i++ )); do
+    need_matrix_array[$pid*$m+$i]=$((need_matrix_array[$pid*$m+$i] - request_vector_array[$i]))
+  done
+
+  # Print the new available vector
+  echo -e "The New Available Vector is:"
+  printf '%s  ' " "
+  print_letter $m
+  echo -e "${available_vector_array[@]}\n"
+
+  # Print the new allocation matrix
+  echo "The New Allocation Matrix is:"
+  printf '%s  ' " "
+  print_letter $m
+  for (( i=0; i<n; i++ )); do
+    printf '%s: ' "${i}"
+    for (( j=0; j<m; j++ )); do
+      printf '%s ' "${allocation_matrix_array[$i*$m+$j]}"
+    done
+    printf '\n'
+  done
+
+  echo ""
+
+  # Print the new need matrix
+  echo "The New Need Matrix is:"
+  printf '%s  ' " "
+  print_letter $m
+  for (( i=0; i<n; i++ )); do
+    printf '%s: ' "${i}"
+    for (( j=0; j<m; j++ )); do
+      printf '%s ' "${need_matrix_array[$i*$m+$j]}"
+    done
+    printf '\n'
+  done
+
+  exit 0
+
+}
+
+# Load the helper functions
+
+# Extraction functions
+. extraction.sh
+
+# Function to determine if the system is in a safe state
+. safestate.sh
+
+# Function to determine if a request can be granted
+. request.sh
+
+main "$@"
